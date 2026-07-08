@@ -1,0 +1,10 @@
+[Unit]
+Description=NapCat login watchdog
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/napcat-login-watchdog
+EnvironmentFile=/opt/napcat-login-watchdog/.env
+ExecStart=/opt/miniconda3/envs/napcat-login-watchdog/bin/napcat-login-watchdog run

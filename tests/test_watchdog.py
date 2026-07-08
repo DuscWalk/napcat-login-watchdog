@@ -1,0 +1,168 @@
+import json
+from pathlib import Path
+
+from napcat_login_watchdog.config import WatchdogConfig
+from napcat_login_watchdog.runner import WatchdogDependencies, run_watchdog
+from napcat_login_watchdog.webhook import QrClickResult, handle_qr_click
+
+
+def test_run_watchdog_sends_offline_email_once_and_records_state(tmp_path: Path) -> None:
+    qr = tmp_path / "qrcode.png"
+    qr.write_bytes(b"fake-png")
+    sent = []
+    config = WatchdogConfig(
+        state_path=str(tmp_path / "state.json"),
+        qr_path=str(qr),
+        smtp_user="sender@qq.com",
+        smtp_password="smtp-code",
+        alert_email_from="sender@qq.com",
+        alert_email_to=["admin@example.com"],
+    )
+    deps = WatchdogDependencies(
+        service_is_active=lambda service: service == "napcat.service",
+        tcp_connect=lambda host, port: False,
+        read_recent_logs=lambda cfg: "请扫描下面的二维码",
+        send_email=lambda cfg, message: sent.append(message),
+        read_replies=lambda cfg: [],
+        run_refresh_command=lambda cfg: 0,
+        now=lambda: 120.0,
+        token_factory=lambda: "abc123",
+        sleep=lambda seconds: None,
+        log=lambda message: None,
+    )
+
+    first = run_watchdog(config, deps)
+    second = run_watchdog(config, deps)
+
+    assert first.status == "unhealthy"
+    assert second.status == "unhealthy"
+    assert len(sent) == 1
+    state = json.loads(Path(config.state_path).read_text(encoding="utf-8"))
+    assert state["status"] == "unhealthy"
+    assert state["last_failure_reasons"]
+
+
+def test_run_watchdog_sends_recovery_after_unhealthy(tmp_path: Path) -> None:
+    sent = []
+    config = WatchdogConfig(
+        state_path=str(tmp_path / "state.json"),
+        smtp_user="sender@qq.com",
+        smtp_password="smtp-code",
+        alert_email_from="sender@qq.com",
+        alert_email_to=["admin@example.com"],
+    )
+    unhealthy_deps = WatchdogDependencies(
+        service_is_active=lambda service: False,
+        tcp_connect=lambda host, port: False,
+        read_recent_logs=lambda cfg: "",
+        send_email=lambda cfg, message: sent.append(message),
+        read_replies=lambda cfg: [],
+        run_refresh_command=lambda cfg: 0,
+        now=lambda: 100.0,
+        token_factory=lambda: "abc123",
+        sleep=lambda seconds: None,
+        log=lambda message: None,
+    )
+    healthy_deps = WatchdogDependencies(
+        service_is_active=lambda service: True,
+        tcp_connect=lambda host, port: True,
+        read_recent_logs=lambda cfg: "",
+        send_email=lambda cfg, message: sent.append(message),
+        read_replies=lambda cfg: [],
+        run_refresh_command=lambda cfg: 0,
+        now=lambda: 200.0,
+        token_factory=lambda: "def456",
+        sleep=lambda seconds: None,
+        log=lambda message: None,
+    )
+
+    run_watchdog(config, unhealthy_deps)
+    report = run_watchdog(config, healthy_deps)
+
+    assert report.status == "healthy"
+    assert [message["Subject"] for message in sent] == [
+        "[napcat-watchdog] NapCat login may be offline [qr:abc123]",
+        "[napcat-watchdog] NapCat login recovered",
+    ]
+
+
+def test_run_watchdog_reply_sends_fresh_qr_and_marks_uid(tmp_path: Path) -> None:
+    qr = tmp_path / "qrcode.png"
+    qr.write_bytes(b"fake-png")
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        '{"status":"unhealthy","active_qr_token":"abc123","handled_reply_uids":[]}',
+        encoding="utf-8",
+    )
+    sent = []
+    refreshes = []
+    config = WatchdogConfig(
+        state_path=str(state_path),
+        qr_path=str(qr),
+        reply_enabled=True,
+        reply_allowed_senders=["admin@example.com"],
+        smtp_user="sender@qq.com",
+        smtp_password="smtp-code",
+        alert_email_from="sender@qq.com",
+        alert_email_to=["admin@example.com"],
+        imap_user="sender@qq.com",
+        imap_password="imap-code",
+    )
+    deps = WatchdogDependencies(
+        service_is_active=lambda service: True,
+        tcp_connect=lambda host, port: False,
+        read_recent_logs=lambda cfg: "请扫描下面的二维码",
+        send_email=lambda cfg, message: sent.append(message),
+        read_replies=lambda cfg: [
+            deps.reply_type(uid="42", sender="admin@example.com", subject="Re: [qr:abc123]", body="")
+        ],
+        run_refresh_command=lambda cfg: refreshes.append(cfg.qr_refresh_command) or 0,
+        now=lambda: 120.0,
+        token_factory=lambda: "abc123",
+        sleep=lambda seconds: None,
+        log=lambda message: None,
+    )
+
+    run_watchdog(config, deps)
+
+    assert refreshes == ["systemctl restart napcat.service"]
+    assert sent[0]["Subject"] == "[napcat-watchdog] Fresh NapCat login QR [qr:abc123]"
+    assert '"42"' in state_path.read_text(encoding="utf-8")
+
+
+def test_handle_qr_click_sends_fresh_qr_when_token_is_valid(tmp_path: Path) -> None:
+    qr = tmp_path / "qrcode.png"
+    qr.write_bytes(b"fake-png")
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        '{"status":"unhealthy","active_qr_token":"abc123","active_qr_token_timestamp":100}',
+        encoding="utf-8",
+    )
+    sent = []
+    refreshes = []
+    config = WatchdogConfig(
+        state_path=str(state_path),
+        qr_path=str(qr),
+        smtp_user="sender@qq.com",
+        smtp_password="smtp-code",
+        alert_email_from="sender@qq.com",
+        alert_email_to=["admin@example.com"],
+    )
+    deps = WatchdogDependencies(
+        service_is_active=lambda service: True,
+        tcp_connect=lambda host, port: True,
+        read_recent_logs=lambda cfg: "",
+        send_email=lambda cfg, message: sent.append(message),
+        read_replies=lambda cfg: [],
+        run_refresh_command=lambda cfg: refreshes.append(cfg.qr_refresh_command) or 0,
+        now=lambda: 120.0,
+        token_factory=lambda: "unused",
+        sleep=lambda seconds: None,
+        log=lambda message: None,
+    )
+
+    result = handle_qr_click(config, "abc123", deps)
+
+    assert result == QrClickResult(status="sent", email_sent=True)
+    assert refreshes == ["systemctl restart napcat.service"]
+    assert len(sent) == 1
