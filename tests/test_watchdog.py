@@ -151,6 +151,46 @@ def test_run_watchdog_sends_recovery_after_unhealthy(tmp_path: Path) -> None:
     ]
 
 
+def test_run_watchdog_rotates_click_token_for_new_offline_alert(tmp_path: Path) -> None:
+    qr = tmp_path / "qrcode.png"
+    qr.write_bytes(b"fake-png")
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        '{"status":"healthy","active_qr_token":"old-token","active_qr_token_timestamp":10}',
+        encoding="utf-8",
+    )
+    sent = []
+    config = WatchdogConfig(
+        state_path=str(state_path),
+        qr_path=str(qr),
+        click_public_base_url="https://bot.example.com",
+        smtp_user="sender@qq.com",
+        smtp_password="smtp-code",
+        alert_email_from="sender@qq.com",
+        alert_email_to=["admin@example.com"],
+    )
+    deps = WatchdogDependencies(
+        service_is_active=lambda service: False,
+        tcp_connect=lambda host, port: False,
+        read_recent_logs=lambda cfg: "",
+        send_email=lambda cfg, message: sent.append(message),
+        read_replies=lambda cfg: [],
+        run_refresh_command=lambda cfg: 0,
+        now=lambda: 500.0,
+        token_factory=lambda: "fresh-token",
+        sleep=lambda seconds: None,
+        log=lambda message: None,
+    )
+
+    run_watchdog(config, deps)
+
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state["active_qr_token"] == "fresh-token"
+    assert state["active_qr_token_timestamp"] == 500
+    assert "https://bot.example.com/watchdog/qr/fresh-token" in sent[0].as_string()
+    assert "old-token" not in sent[0].as_string()
+
+
 def test_run_watchdog_reply_sends_fresh_qr_and_marks_uid(tmp_path: Path) -> None:
     qr = tmp_path / "qrcode.png"
     qr.write_bytes(b"fake-png")

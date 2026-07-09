@@ -156,14 +156,17 @@ def run_watchdog(config: WatchdogConfig, deps: WatchdogDependencies) -> HealthRe
         recent_logs=deps.read_recent_logs(config),
     )
 
-    token = str(state.get("active_qr_token") or deps.token_factory())
-    if report.status == "unhealthy":
-        if config.click_public_base_url and not state.get("active_qr_token_timestamp"):
-            token = deps.token_factory()
-        state["active_qr_token"] = token
-        state.setdefault("active_qr_token_timestamp", int(deps.now()))
-
     email_kind = decide_status_email(state, report, send_recovery=config.send_recovery)
+    token = str(state.get("active_qr_token") or deps.token_factory())
+    if email_kind == "offline" and config.click_public_base_url:
+        token = deps.token_factory()
+    if report.status == "unhealthy":
+        state["active_qr_token"] = token
+        if email_kind == "offline":
+            state["active_qr_token_timestamp"] = int(deps.now())
+        else:
+            state.setdefault("active_qr_token_timestamp", int(deps.now()))
+
     if email_kind == "offline":
         qr_path = fresh_qr_after_optional_refresh(config, deps, force_refresh=False)
         if send_if_configured(
