@@ -23,9 +23,11 @@ from napcat_login_watchdog.mail import (
     build_email_message,
     email_configured,
     imap_configured,
+    imap_login_ok,
     is_authorized_reply,
     read_imap_replies,
     send_smtp_email,
+    smtp_login_ok,
 )
 from napcat_login_watchdog.qr import find_fresh_qr
 from napcat_login_watchdog.state import load_state, save_state
@@ -43,8 +45,11 @@ class WatchdogDependencies:
     token_factory: Callable[[], str]
     sleep: Callable[[float], None]
     log: Callable[[str], None]
+    run_check_command: Callable[[str], int] = lambda command: 1
     onebot_connected: Callable[[WatchdogConfig], bool] = lambda config: True
     onebot_http_api_healthy: Callable[[WatchdogConfig], bool] = lambda config: True
+    smtp_login_ok: Callable[[WatchdogConfig], bool] = lambda config: False
+    imap_login_ok: Callable[[WatchdogConfig], bool] = lambda config: False
     reply_type: type[MailReply] = MailReply
 
 
@@ -106,15 +111,47 @@ def fresh_qr_after_optional_refresh(
     return qr
 
 
+def service_is_healthy(
+    config: WatchdogConfig,
+    deps: WatchdogDependencies,
+    *,
+    service: str,
+    command: str,
+) -> bool:
+    if config.service_check_mode == "none":
+        return True
+    if config.service_check_mode == "command":
+        return bool(command) and deps.run_check_command(command) == 0
+    if config.service_check_mode == "systemd":
+        return deps.service_is_active(service)
+    return False
+
+
+def onebot_socket_healthy(config: WatchdogConfig, deps: WatchdogDependencies) -> bool:
+    if config.onebot_connection_check == "none":
+        return True
+    return deps.onebot_connected(config)
+
+
 def run_watchdog(config: WatchdogConfig, deps: WatchdogDependencies) -> HealthReport:
     state_path = Path(config.state_path)
     state = load_state(state_path)
     report = evaluate_health(
         config,
-        bot_active=deps.service_is_active(config.bot_service),
-        napcat_active=deps.service_is_active(config.napcat_service),
+        bot_active=service_is_healthy(
+            config,
+            deps,
+            service=config.bot_service,
+            command=config.bot_check_command,
+        ),
+        napcat_active=service_is_healthy(
+            config,
+            deps,
+            service=config.napcat_service,
+            command=config.napcat_check_command,
+        ),
         tcp_ok=deps.tcp_connect(config.host, config.port),
-        onebot_connected=deps.onebot_connected(config),
+        onebot_connected=onebot_socket_healthy(config, deps),
         onebot_http_api_healthy=deps.onebot_http_api_healthy(config),
         recent_logs=deps.read_recent_logs(config),
     )
@@ -198,6 +235,24 @@ def tcp_connect(host: str, port: int) -> bool:
 
 def read_recent_logs(config: WatchdogConfig) -> str:
     since = f"-{config.log_window_minutes} minutes"
+    if config.log_command:
+        command = config.log_command.format(
+            minutes=config.log_window_minutes,
+            since=since,
+            bot_service=config.bot_service,
+            napcat_service=config.napcat_service,
+        )
+        result = subprocess.run(
+            command,
+            check=False,
+            shell=True,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            errors="replace",
+        )
+        return result.stdout or ""
+
     chunks: list[str] = []
     for unit in (config.napcat_service, config.bot_service):
         result = subprocess.run(
@@ -223,6 +278,16 @@ def run_refresh_command(config: WatchdogConfig) -> int:
     ).returncode
 
 
+def run_check_command(command: str) -> int:
+    return subprocess.run(
+        command,
+        check=False,
+        shell=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    ).returncode
+
+
 def default_dependencies() -> WatchdogDependencies:
     return WatchdogDependencies(
         service_is_active=systemd_service_is_active,
@@ -231,10 +296,13 @@ def default_dependencies() -> WatchdogDependencies:
         send_email=send_smtp_email,
         read_replies=read_imap_replies,
         run_refresh_command=run_refresh_command,
+        run_check_command=run_check_command,
         now=time.time,
         token_factory=lambda: secrets.token_urlsafe(18),
         sleep=time.sleep,
         log=lambda message: print(message),
         onebot_connected=onebot_connected,
         onebot_http_api_healthy=onebot_http_api_healthy,
+        smtp_login_ok=smtp_login_ok,
+        imap_login_ok=imap_login_ok,
     )

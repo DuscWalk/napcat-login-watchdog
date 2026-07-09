@@ -42,6 +42,71 @@ def test_run_watchdog_sends_offline_email_once_and_records_state(tmp_path: Path)
     assert state["last_failure_reasons"]
 
 
+def test_run_watchdog_can_skip_service_and_onebot_socket_checks(tmp_path: Path) -> None:
+    sent = []
+    config = WatchdogConfig(
+        state_path=str(tmp_path / "state.json"),
+        service_check_mode="none",
+        onebot_connection_check="none",
+        smtp_user="sender@qq.com",
+        smtp_password="smtp-code",
+        alert_email_from="sender@qq.com",
+        alert_email_to=["admin@example.com"],
+    )
+    deps = WatchdogDependencies(
+        service_is_active=lambda service: False,
+        tcp_connect=lambda host, port: True,
+        read_recent_logs=lambda cfg: "",
+        send_email=lambda cfg, message: sent.append(message),
+        read_replies=lambda cfg: [],
+        run_refresh_command=lambda cfg: 0,
+        now=lambda: 120.0,
+        token_factory=lambda: "abc123",
+        sleep=lambda seconds: None,
+        log=lambda message: None,
+        onebot_connected=lambda cfg: False,
+    )
+
+    report = run_watchdog(config, deps)
+
+    assert report.status == "healthy"
+    assert sent == []
+
+
+def test_run_watchdog_uses_command_service_checks(tmp_path: Path) -> None:
+    commands = []
+    config = WatchdogConfig(
+        state_path=str(tmp_path / "state.json"),
+        service_check_mode="command",
+        bot_check_command="check-bot",
+        napcat_check_command="check-napcat",
+        require_onebot_connection=False,
+        smtp_user="sender@qq.com",
+        smtp_password="smtp-code",
+        alert_email_from="sender@qq.com",
+        alert_email_to=["admin@example.com"],
+    )
+    deps = WatchdogDependencies(
+        service_is_active=lambda service: False,
+        tcp_connect=lambda host, port: True,
+        read_recent_logs=lambda cfg: "",
+        send_email=lambda cfg, message: None,
+        read_replies=lambda cfg: [],
+        run_refresh_command=lambda cfg: 0,
+        run_check_command=lambda command: commands.append(command) or (1 if command == "check-bot" else 0),
+        now=lambda: 120.0,
+        token_factory=lambda: "abc123",
+        sleep=lambda seconds: None,
+        log=lambda message: None,
+    )
+
+    report = run_watchdog(config, deps)
+
+    assert commands == ["check-bot", "check-napcat"]
+    assert report.status == "unhealthy"
+    assert "qq-rolebot.service is not active" in report.reasons
+
+
 def test_run_watchdog_sends_recovery_after_unhealthy(tmp_path: Path) -> None:
     sent = []
     config = WatchdogConfig(

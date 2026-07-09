@@ -135,6 +135,10 @@ def onebot_http_api_healthy(config: WatchdogConfig) -> bool:
 
 
 def onebot_connected(config: WatchdogConfig) -> bool:
+    if config.onebot_connection_check == "none":
+        return True
+    if config.onebot_connection_check != "ss":
+        return False
     result = subprocess.run(
         ["ss", "-H", "-tnp"],
         check=False,

@@ -8,14 +8,19 @@ from dataclasses import dataclass, field
 class WatchdogConfig:
     bot_service: str = "qq-rolebot.service"
     napcat_service: str = "napcat.service"
+    service_check_mode: str = "systemd"
+    bot_check_command: str = ""
+    napcat_check_command: str = ""
     host: str = "127.0.0.1"
     port: int = 8080
     require_onebot_connection: bool = True
+    onebot_connection_check: str = "ss"
     require_onebot_http_api: bool = False
     onebot_http_api_base: str = ""
     onebot_http_api_token: str = ""
     onebot_http_api_timeout_seconds: int = 5
     log_window_minutes: int = 10
+    log_command: str = ""
     state_path: str = "/opt/napcat-login-watchdog/state.json"
     send_recovery: bool = True
     qr_path: str = ""
@@ -34,6 +39,7 @@ class WatchdogConfig:
     smtp_host: str = "smtp.qq.com"
     smtp_port: int = 465
     smtp_ssl: bool = True
+    smtp_starttls: bool = True
     smtp_user: str = ""
     smtp_password: str = ""
     alert_email_from: str = ""
@@ -78,9 +84,13 @@ def load_config(env: Mapping[str, str]) -> WatchdogConfig:
     return WatchdogConfig(
         bot_service=env.get("WATCHDOG_BOT_SERVICE", "qq-rolebot.service"),
         napcat_service=env.get("WATCHDOG_NAPCAT_SERVICE", "napcat.service"),
+        service_check_mode=env.get("WATCHDOG_SERVICE_CHECK_MODE", "systemd").strip().lower(),
+        bot_check_command=env.get("WATCHDOG_BOT_CHECK_COMMAND", ""),
+        napcat_check_command=env.get("WATCHDOG_NAPCAT_CHECK_COMMAND", ""),
         host=env.get("WATCHDOG_HOST", "127.0.0.1"),
         port=int_env(env.get("WATCHDOG_PORT"), 8080),
         require_onebot_connection=bool_env(env.get("WATCHDOG_REQUIRE_ONEBOT_CONNECTION"), True),
+        onebot_connection_check=env.get("WATCHDOG_ONEBOT_CONNECTION_CHECK", "ss").strip().lower(),
         require_onebot_http_api=bool_env(env.get("WATCHDOG_REQUIRE_ONEBOT_HTTP_API"), False),
         onebot_http_api_base=env.get("WATCHDOG_ONEBOT_HTTP_API_BASE", "").rstrip("/"),
         onebot_http_api_token=env.get("WATCHDOG_ONEBOT_HTTP_API_TOKEN", ""),
@@ -89,6 +99,7 @@ def load_config(env: Mapping[str, str]) -> WatchdogConfig:
             5,
         ),
         log_window_minutes=int_env(env.get("WATCHDOG_LOG_WINDOW_MINUTES"), 10),
+        log_command=env.get("WATCHDOG_LOG_COMMAND", ""),
         state_path=env.get("WATCHDOG_STATE_PATH", "/opt/napcat-login-watchdog/state.json"),
         send_recovery=bool_env(env.get("WATCHDOG_SEND_RECOVERY"), True),
         qr_path=env.get("WATCHDOG_QR_PATH", ""),
@@ -108,6 +119,7 @@ def load_config(env: Mapping[str, str]) -> WatchdogConfig:
         smtp_host=env.get("SMTP_HOST", "smtp.qq.com"),
         smtp_port=int_env(env.get("SMTP_PORT"), 465),
         smtp_ssl=bool_env(env.get("SMTP_SSL"), True),
+        smtp_starttls=bool_env(env.get("SMTP_STARTTLS"), True),
         smtp_user=smtp_user,
         smtp_password=env.get("SMTP_PASSWORD", ""),
         alert_email_from=env.get("ALERT_EMAIL_FROM", smtp_user),

@@ -4,6 +4,7 @@ import os
 import sys
 
 from napcat_login_watchdog.config import load_config
+from napcat_login_watchdog.doctor import run_doctor
 from napcat_login_watchdog.runner import default_dependencies, run_watchdog
 from napcat_login_watchdog.webhook import serve_qr_click_webhook
 
@@ -24,7 +25,17 @@ def main(argv: list[str] | None = None) -> int:
         serve_qr_click_webhook(config, deps)
         return 0
 
-    print("usage: napcat-login-watchdog [run|serve-click-webhook]", file=sys.stderr)
+    if argv == ["doctor"]:
+        for result in run_doctor(config, deps):
+            name, status, detail = (
+                (result.name, result.status, result.detail)
+                if hasattr(result, "name")
+                else result
+            )
+            print(f"[{status}] {name} - {detail}")
+        return 0
+
+    print("usage: napcat-login-watchdog [run|doctor|serve-click-webhook]", file=sys.stderr)
     return 2
 
 

@@ -19,6 +19,8 @@ helpers.
 
 ## Install
 
+With conda:
+
 ```bash
 cd /opt
 git clone git@github.com:DuscWalk/napcat-login-watchdog.git
@@ -29,7 +31,67 @@ cp .env.example .env
 chmod 600 .env
 ```
 
+With a plain Python virtual environment:
+
+```bash
+cd /opt
+git clone git@github.com:DuscWalk/napcat-login-watchdog.git
+cd /opt/napcat-login-watchdog
+python3.11 -m venv .venv
+.venv/bin/pip install -e .
+cp .env.example .env
+chmod 600 .env
+```
+
 Edit `.env` and set SMTP credentials, alert recipients, service names, and QR paths.
+
+## Configuration Guide
+
+### Already Running With systemd
+
+This is the default mode. Set the service names and bot port:
+
+```bash
+WATCHDOG_SERVICE_CHECK_MODE=systemd
+WATCHDOG_BOT_SERVICE=qq-rolebot.service
+WATCHDOG_NAPCAT_SERVICE=napcat.service
+WATCHDOG_HOST=127.0.0.1
+WATCHDOG_PORT=8080
+```
+
+### Docker, Compose, pm2, supervisor, or Manual Start
+
+Use command checks when NapCat or your bot is not managed by systemd:
+
+```bash
+WATCHDOG_SERVICE_CHECK_MODE=command
+WATCHDOG_BOT_CHECK_COMMAND='test "$(docker inspect --format="{{.State.Running}}" qq-rolebot)" = true'
+WATCHDOG_NAPCAT_CHECK_COMMAND='test "$(docker inspect --format="{{.State.Running}}" napcat)" = true'
+```
+
+For Compose logs, replace journalctl with a custom log command:
+
+```bash
+WATCHDOG_LOG_COMMAND='docker logs --since {minutes}m napcat'
+```
+
+Supported placeholders are `{minutes}`, `{since}`, `{bot_service}`, and `{napcat_service}`.
+
+If you only want to check the OneBot HTTP API and bot TCP port, skip service checks:
+
+```bash
+WATCHDOG_SERVICE_CHECK_MODE=none
+```
+
+### No Reverse WebSocket Socket Check
+
+Some environments do not have `ss`, or the OneBot connection is hidden inside a container network.
+Disable the socket check and rely on OneBot HTTP API instead:
+
+```bash
+WATCHDOG_ONEBOT_CONNECTION_CHECK=none
+WATCHDOG_REQUIRE_ONEBOT_HTTP_API=true
+```
 
 ## OneBot HTTP API
 
@@ -59,6 +121,61 @@ WATCHDOG_ONEBOT_HTTP_API_TOKEN=same-onebot-token
 
 Do not expose the OneBot HTTP API to the public internet.
 
+## Email Providers
+
+QQ Mail with authorization code:
+
+```bash
+SMTP_HOST=smtp.qq.com
+SMTP_PORT=465
+SMTP_SSL=true
+SMTP_USER=your@qq.com
+SMTP_PASSWORD=qq-mail-authorization-code
+ALERT_EMAIL_FROM=your@qq.com
+ALERT_EMAIL_TO=admin@example.com
+IMAP_HOST=imap.qq.com
+IMAP_PORT=993
+IMAP_USER=your@qq.com
+IMAP_PASSWORD=qq-mail-authorization-code
+```
+
+Gmail with app password:
+
+```bash
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_SSL=false
+SMTP_STARTTLS=true
+SMTP_USER=your@gmail.com
+SMTP_PASSWORD=gmail-app-password
+ALERT_EMAIL_FROM=your@gmail.com
+ALERT_EMAIL_TO=admin@example.com
+IMAP_HOST=imap.gmail.com
+IMAP_PORT=993
+IMAP_USER=your@gmail.com
+IMAP_PASSWORD=gmail-app-password
+```
+
+Outlook or Microsoft 365:
+
+```bash
+SMTP_HOST=smtp.office365.com
+SMTP_PORT=587
+SMTP_SSL=false
+SMTP_STARTTLS=true
+SMTP_USER=your@outlook.com
+SMTP_PASSWORD=account-or-app-password
+ALERT_EMAIL_FROM=your@outlook.com
+ALERT_EMAIL_TO=admin@example.com
+IMAP_HOST=outlook.office365.com
+IMAP_PORT=993
+IMAP_USER=your@outlook.com
+IMAP_PASSWORD=account-or-app-password
+```
+
+If your provider requires implicit TLS on port 465, use `SMTP_SSL=true`. If it requires STARTTLS on
+port 587, use `SMTP_SSL=false` and `SMTP_STARTTLS=true`.
+
 ## Run Manually
 
 ```bash
@@ -80,6 +197,30 @@ or:
 status=unhealthy
 reason=OneBot HTTP API status check failed
 reason=NapCat login requires QR/manual verification
+```
+
+## Diagnose Configuration
+
+Run this before enabling the timer:
+
+```bash
+set -a
+. /opt/napcat-login-watchdog/.env
+set +a
+napcat-login-watchdog doctor
+```
+
+Example output:
+
+```text
+[ok] bot service - qq-rolebot.service is healthy
+[ok] napcat service - napcat.service is healthy
+[ok] tcp port - 127.0.0.1:8080 is reachable
+[ok] OneBot reverse WebSocket - connection check passed
+[ok] OneBot HTTP API - status check passed
+[warn] QR image - no fresh QR image currently available
+[ok] SMTP - login succeeded
+[skip] IMAP - WATCHDOG_REPLY_ENABLED=false
 ```
 
 ## systemd

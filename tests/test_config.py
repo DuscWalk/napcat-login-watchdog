@@ -47,3 +47,25 @@ def test_load_config_parses_onebot_http_and_click_settings() -> None:
     assert config.click_host == "0.0.0.0"
     assert config.click_port == 18081
     assert config.click_path_prefix == "/qr"
+
+
+def test_load_config_parses_portability_settings() -> None:
+    config = load_config(
+        {
+            "WATCHDOG_SERVICE_CHECK_MODE": "command",
+            "WATCHDOG_BOT_CHECK_COMMAND": "docker inspect bot",
+            "WATCHDOG_NAPCAT_CHECK_COMMAND": "docker inspect napcat",
+            "WATCHDOG_ONEBOT_CONNECTION_CHECK": "none",
+            "WATCHDOG_LOG_COMMAND": "docker logs --since {minutes}m napcat",
+            "SMTP_SSL": "false",
+            "SMTP_STARTTLS": "true",
+        }
+    )
+
+    assert config.service_check_mode == "command"
+    assert config.bot_check_command == "docker inspect bot"
+    assert config.napcat_check_command == "docker inspect napcat"
+    assert config.onebot_connection_check == "none"
+    assert config.log_command == "docker logs --since {minutes}m napcat"
+    assert config.smtp_ssl is False
+    assert config.smtp_starttls is True

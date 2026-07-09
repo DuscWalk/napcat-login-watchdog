@@ -141,9 +141,38 @@ def send_smtp_email(config: WatchdogConfig, message: EmailMessage) -> None:
             smtp.send_message(message)
         return
     with smtplib.SMTP(config.smtp_host, config.smtp_port, timeout=20) as smtp:
-        smtp.starttls()
+        if config.smtp_starttls:
+            smtp.starttls()
         smtp.login(config.smtp_user, config.smtp_password)
         smtp.send_message(message)
+
+
+def smtp_login_ok(config: WatchdogConfig) -> bool:
+    if not email_configured(config):
+        return False
+    try:
+        if config.smtp_ssl:
+            with smtplib.SMTP_SSL(config.smtp_host, config.smtp_port, timeout=20) as smtp:
+                smtp.login(config.smtp_user, config.smtp_password)
+            return True
+        with smtplib.SMTP(config.smtp_host, config.smtp_port, timeout=20) as smtp:
+            if config.smtp_starttls:
+                smtp.starttls()
+            smtp.login(config.smtp_user, config.smtp_password)
+        return True
+    except (OSError, smtplib.SMTPException):
+        return False
+
+
+def imap_login_ok(config: WatchdogConfig) -> bool:
+    if not imap_configured(config):
+        return False
+    try:
+        with imaplib.IMAP4_SSL(config.imap_host, config.imap_port) as mailbox:
+            mailbox.login(config.imap_user, config.imap_password)
+        return True
+    except (OSError, imaplib.IMAP4.error):
+        return False
 
 
 def decode_header_value(value: str | None) -> str:
