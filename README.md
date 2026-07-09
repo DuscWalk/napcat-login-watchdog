@@ -1,8 +1,14 @@
 # napcat-login-watchdog
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 Standalone watchdog for NapCat login state. It checks service health, OneBot connectivity, OneBot
 HTTP API account status, NapCat login markers, and sends email alerts with fresh QR recovery
 helpers.
+
+This project is for the very ordinary, very annoying failure mode where your NapCat QQ account gets
+forced offline by QQ risk control and you do not want to SSH into the server just to dig a login QR
+code out of logs.
 
 ## Features
 
@@ -16,6 +22,26 @@ helpers.
 - Attaches the newest fresh NapCat QR image when available.
 - Can refresh QR by authorized IMAP replies.
 - Can refresh QR by a tokenized click link webhook.
+
+## How It Feels In Practice
+
+1. Your NapCat bot is running normally.
+2. QQ invalidates the login state.
+3. The watchdog notices the unhealthy account state from OneBot HTTP API, WebSocket state, service
+   checks, or explicit NapCat login markers.
+4. The watchdog restarts or refreshes NapCat if configured, finds the fresh QR image, and sends an
+   alert email.
+5. You scan the QR from the email. No SSH session, no `journalctl` hunting.
+6. If the QR expires, reply to the email with `qr` or click the tokenized refresh link.
+
+## Requirements
+
+- Linux server with Python 3.11 or newer.
+- NapCat already installed.
+- A running bot or OneBot receiver to check, unless you intentionally disable that check.
+- An SMTP account for alerts.
+- Optional IMAP account if you want reply-to-email QR refresh.
+- Optional public HTTPS reverse proxy if you want click-link QR refresh.
 
 ## Install
 
@@ -54,6 +80,13 @@ chmod 600 .env
 ```
 
 Edit `.env` and set SMTP credentials, alert recipients, service names, and QR paths.
+
+If `napcat-login-watchdog` is not in `PATH`, use the absolute executable path:
+
+```bash
+/opt/miniconda3/envs/napcat-login-watchdog/bin/napcat-login-watchdog doctor
+/opt/napcat-login-watchdog/.venv/bin/napcat-login-watchdog doctor
+```
 
 ## First Setup Flow
 
@@ -280,6 +313,25 @@ Example output:
 [skip] IMAP - WATCHDOG_REPLY_ENABLED=false
 ```
 
+Treat `doctor` as a pre-flight checklist. It does not send alert emails and does not restart
+NapCat. Use `test-email` and `test-alert` for those checks.
+
+## Command Reference
+
+```bash
+napcat-login-watchdog run
+napcat-login-watchdog doctor
+napcat-login-watchdog test-email
+napcat-login-watchdog test-alert
+napcat-login-watchdog serve-click-webhook
+```
+
+- `run`: perform one watchdog check, update state, and send transition emails if needed.
+- `doctor`: print diagnostic checks without sending alerts or refreshing QR.
+- `test-email`: send one plain test email.
+- `test-alert`: refresh/find a QR image and send one QR attachment email.
+- `serve-click-webhook`: run the optional tokenized QR refresh HTTP endpoint.
+
 ## systemd
 
 Use the conda units if you installed with `/opt/miniconda3/envs/napcat-login-watchdog`:
@@ -386,6 +438,54 @@ WATCHDOG_STATE_PATH=/data/state.json
 
 Mount the NapCat config/cache volume so `WATCHDOG_QR_GLOB` can find `qrcode.png`, or set
 `WATCHDOG_QR_REFRESH_COMMAND` to a command that restarts the NapCat container.
+
+## Troubleshooting
+
+### `doctor` says SMTP failed
+
+Check that your provider allows SMTP login. QQ Mail, Gmail, and many corporate mailboxes require an
+authorization code or app password instead of the normal account password.
+
+### `doctor` says OneBot HTTP API failed
+
+Confirm that NapCat is listening on the configured localhost port:
+
+```bash
+ss -ltnp | grep ':3001'
+```
+
+Then test the endpoint manually from the server. Keep the token private:
+
+```bash
+curl -sS -H "Authorization: Bearer $WATCHDOG_ONEBOT_HTTP_API_TOKEN" \
+  -X POST "$WATCHDOG_ONEBOT_HTTP_API_BASE/get_status" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+### QR image is missing
+
+Ask NapCat to generate a fresh QR, then search common locations:
+
+```bash
+find /root/Napcat /opt -name qrcode.png 2>/dev/null
+```
+
+Set `WATCHDOG_QR_PATH` to the exact file or adjust `WATCHDOG_QR_GLOB`.
+
+### You receive one alert but no repeated emails
+
+This is intentional. The watchdog sends offline email only when state changes from healthy to
+unhealthy. Use the reply or click refresh flow to request another QR while the account remains
+unhealthy.
+
+## Security Notes
+
+- Do not expose the OneBot HTTP API to the public internet.
+- Keep `.env` mode `600`.
+- Do not paste QR URLs, WebUI URLs, OneBot tokens, SMTP passwords, or QQ passwords into issues.
+- The QR attachment grants login access. Treat alert emails as sensitive.
+- If you expose the click webhook, put it behind HTTPS and keep it bound to localhost locally.
 
 ## Development
 
