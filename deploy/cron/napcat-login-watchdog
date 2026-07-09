@@ -1,0 +1,2 @@
+* * * * * cd /opt/napcat-login-watchdog && set -a && . /opt/napcat-login-watchdog/.env && set +a && /opt/napcat-login-watchdog/.venv/bin/napcat-login-watchdog run
+

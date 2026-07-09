@@ -19,12 +19,25 @@ helpers.
 
 ## Install
 
-With conda:
+Clone with HTTPS if the server does not have a GitHub SSH key:
+
+```bash
+cd /opt
+git clone https://github.com/DuscWalk/napcat-login-watchdog.git
+cd /opt/napcat-login-watchdog
+```
+
+Or clone with SSH:
 
 ```bash
 cd /opt
 git clone git@github.com:DuscWalk/napcat-login-watchdog.git
 cd /opt/napcat-login-watchdog
+```
+
+With conda:
+
+```bash
 conda create -n napcat-login-watchdog python=3.11 -y
 /opt/miniconda3/envs/napcat-login-watchdog/bin/pip install -e .
 cp .env.example .env
@@ -34,9 +47,6 @@ chmod 600 .env
 With a plain Python virtual environment:
 
 ```bash
-cd /opt
-git clone git@github.com:DuscWalk/napcat-login-watchdog.git
-cd /opt/napcat-login-watchdog
 python3.11 -m venv .venv
 .venv/bin/pip install -e .
 cp .env.example .env
@@ -44,6 +54,16 @@ chmod 600 .env
 ```
 
 Edit `.env` and set SMTP credentials, alert recipients, service names, and QR paths.
+
+## First Setup Flow
+
+1. Configure how to detect your bot and NapCat process.
+2. Configure OneBot HTTP API for reliable login-state checks.
+3. Configure SMTP, and optionally IMAP for reply-to-email QR refresh.
+4. Run `napcat-login-watchdog doctor`.
+5. Run `napcat-login-watchdog test-email`.
+6. Enable the timer.
+7. Optional: enable the click webhook behind HTTPS.
 
 ## Configuration Guide
 
@@ -120,6 +140,21 @@ WATCHDOG_ONEBOT_HTTP_API_TOKEN=same-onebot-token
 ```
 
 Do not expose the OneBot HTTP API to the public internet.
+
+Common NapCat config locations include:
+
+```bash
+find /root/Napcat -name 'onebot11_*.json' -o -name 'qrcode.png'
+find /opt -path '*napcat*' -name 'onebot11_*.json' 2>/dev/null
+```
+
+If NapCat runs in Docker, search inside the mounted config volume, or run:
+
+```bash
+docker exec -it napcat sh -lc "find / -name 'onebot11_*.json' -o -name 'qrcode.png' 2>/dev/null | head -50"
+```
+
+After changing NapCat's OneBot config, restart NapCat and run `napcat-login-watchdog doctor`.
 
 ## Email Providers
 
@@ -199,6 +234,14 @@ reason=OneBot HTTP API status check failed
 reason=NapCat login requires QR/manual verification
 ```
 
+Send a real test email:
+
+```bash
+napcat-login-watchdog test-email
+```
+
+This command sends one message to `ALERT_EMAIL_TO`. Use it before enabling the timer.
+
 ## Diagnose Configuration
 
 Run this before enabling the timer:
@@ -225,8 +268,19 @@ Example output:
 
 ## systemd
 
+Use the conda units if you installed with `/opt/miniconda3/envs/napcat-login-watchdog`:
+
 ```bash
 cp deploy/systemd/napcat-login-watchdog.service /etc/systemd/system/
+cp deploy/systemd/napcat-login-watchdog.timer /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now napcat-login-watchdog.timer
+```
+
+Use the venv unit if you installed with `/opt/napcat-login-watchdog/.venv`:
+
+```bash
+cp deploy/systemd/napcat-login-watchdog-venv.service /etc/systemd/system/napcat-login-watchdog.service
 cp deploy/systemd/napcat-login-watchdog.timer /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now napcat-login-watchdog.timer
@@ -240,8 +294,66 @@ systemctl daemon-reload
 systemctl enable --now napcat-login-watchdog-click.service
 ```
 
+For venv:
+
+```bash
+cp deploy/systemd/napcat-login-watchdog-click-venv.service /etc/systemd/system/napcat-login-watchdog-click.service
+systemctl daemon-reload
+systemctl enable --now napcat-login-watchdog-click.service
+```
+
 If `WATCHDOG_CLICK_PUBLIC_BASE_URL` is set, alert emails include a tokenized button that calls the
 webhook to refresh the QR and send a new QR email.
+
+## cron
+
+If your Linux distribution does not use systemd, run the watchdog from cron:
+
+```bash
+crontab deploy/cron/napcat-login-watchdog
+```
+
+Edit the file first if you installed with conda instead of `.venv`.
+
+## Click Webhook Behind HTTPS
+
+Keep the webhook itself bound to localhost:
+
+```bash
+WATCHDOG_CLICK_HOST=127.0.0.1
+WATCHDOG_CLICK_PORT=18081
+WATCHDOG_CLICK_PUBLIC_BASE_URL=https://watchdog.example.com
+```
+
+Then put Nginx or Caddy in front of it:
+
+```bash
+deploy/reverse-proxy/nginx-watchdog-click.conf
+deploy/reverse-proxy/Caddyfile
+```
+
+The token in the email URL authorizes QR refresh, so use HTTPS and do not publish screenshots of
+alert emails.
+
+## Docker Notes
+
+A minimal Compose example is available at:
+
+```bash
+deploy/compose/docker-compose.example.yml
+```
+
+For Docker deployments, prefer:
+
+```bash
+WATCHDOG_SERVICE_CHECK_MODE=command
+WATCHDOG_ONEBOT_CONNECTION_CHECK=none
+WATCHDOG_REQUIRE_ONEBOT_HTTP_API=true
+WATCHDOG_LOG_COMMAND='docker logs --since {minutes}m napcat'
+```
+
+Mount the NapCat config/cache volume so `WATCHDOG_QR_GLOB` can find `qrcode.png`, or set
+`WATCHDOG_QR_REFRESH_COMMAND` to a command that restarts the NapCat container.
 
 ## Development
 

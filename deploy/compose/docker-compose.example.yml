@@ -1,0 +1,12 @@
+services:
+  napcat-login-watchdog:
+    image: python:3.11-slim
+    working_dir: /app
+    volumes:
+      - .:/app:ro
+      - ./data:/data
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    env_file:
+      - .env
+    command: sh -c "pip install -e . && napcat-login-watchdog run"
+

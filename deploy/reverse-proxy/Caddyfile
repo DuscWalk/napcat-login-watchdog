@@ -1,0 +1,4 @@
+watchdog.example.com {
+    reverse_proxy /watchdog/qr/* 127.0.0.1:18081
+}
+
