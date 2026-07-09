@@ -6,7 +6,11 @@ import sys
 from napcat_login_watchdog.config import load_config
 from napcat_login_watchdog.doctor import run_doctor
 from napcat_login_watchdog.mail import build_email_message, email_configured
-from napcat_login_watchdog.runner import default_dependencies, run_watchdog
+from napcat_login_watchdog.runner import (
+    default_dependencies,
+    fresh_qr_after_optional_refresh,
+    run_watchdog,
+)
 from napcat_login_watchdog.webhook import serve_qr_click_webhook
 
 
@@ -54,8 +58,31 @@ def main(argv: list[str] | None = None) -> int:
         print("test email sent")
         return 0
 
+    if argv == ["test-alert"]:
+        if not email_configured(config):
+            print("alert email is not configured", file=sys.stderr)
+            return 1
+        qr_path = fresh_qr_after_optional_refresh(config, deps, force_refresh=True)
+        if qr_path is None:
+            print("no fresh QR image was available after refresh", file=sys.stderr)
+            return 1
+        deps.send_email(
+            config,
+            build_email_message(
+                config,
+                subject="[napcat-watchdog] Test QR alert",
+                body=(
+                    "This is a test QR alert from napcat-login-watchdog.\n\n"
+                    "A fresh NapCat login QR image should be attached."
+                ),
+                qr_path=qr_path,
+            ),
+        )
+        print("test QR alert sent")
+        return 0
+
     print(
-        "usage: napcat-login-watchdog [run|doctor|test-email|serve-click-webhook]",
+        "usage: napcat-login-watchdog [run|doctor|test-email|test-alert|serve-click-webhook]",
         file=sys.stderr,
     )
     return 2

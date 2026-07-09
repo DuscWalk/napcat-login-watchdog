@@ -62,8 +62,9 @@ Edit `.env` and set SMTP credentials, alert recipients, service names, and QR pa
 3. Configure SMTP, and optionally IMAP for reply-to-email QR refresh.
 4. Run `napcat-login-watchdog doctor`.
 5. Run `napcat-login-watchdog test-email`.
-6. Enable the timer.
-7. Optional: enable the click webhook behind HTTPS.
+6. Run `napcat-login-watchdog test-alert` when NapCat can generate a QR image.
+7. Enable the timer.
+8. Optional: enable the click webhook behind HTTPS.
 
 ## Configuration Guide
 
@@ -130,6 +131,9 @@ For reliable account-state detection, configure NapCat with an HTTP server bound
   "debug": false
 }
 ```
+
+Insert this object into the `network.httpServers` array. Keep existing `websocketClients` entries;
+do not replace the whole file with this snippet.
 
 Then set:
 
@@ -242,6 +246,16 @@ napcat-login-watchdog test-email
 
 This command sends one message to `ALERT_EMAIL_TO`. Use it before enabling the timer.
 
+Send a real QR alert email:
+
+```bash
+napcat-login-watchdog test-alert
+```
+
+This command runs `WATCHDOG_QR_REFRESH_COMMAND`, waits `WATCHDOG_QR_REFRESH_WAIT_SECONDS`, finds a
+fresh QR image, and sends it as an attachment. Use it to prove the exact "I can scan from email"
+workflow before relying on the timer.
+
 ## Diagnose Configuration
 
 Run this before enabling the timer:
@@ -305,12 +319,17 @@ systemctl enable --now napcat-login-watchdog-click.service
 If `WATCHDOG_CLICK_PUBLIC_BASE_URL` is set, alert emails include a tokenized button that calls the
 webhook to refresh the QR and send a new QR email.
 
+The bundled units run as root by default through systemd. That is intentional for common NapCat
+deployments because the watchdog may need to read `/root/Napcat/**/cache/qrcode.png` and restart
+`napcat.service`. If you run it as another user, make sure that user can read the QR file and run
+`WATCHDOG_QR_REFRESH_COMMAND`.
+
 ## cron
 
 If your Linux distribution does not use systemd, run the watchdog from cron:
 
 ```bash
-crontab deploy/cron/napcat-login-watchdog
+(crontab -l 2>/dev/null; cat deploy/cron/napcat-login-watchdog) | crontab -
 ```
 
 Edit the file first if you installed with conda instead of `.venv`.
@@ -343,6 +362,18 @@ A minimal Compose example is available at:
 deploy/compose/docker-compose.example.yml
 ```
 
+Run it from the repository root:
+
+```bash
+docker compose -f deploy/compose/docker-compose.example.yml up -d --build
+```
+
+Enable the optional click webhook profile when needed:
+
+```bash
+docker compose -f deploy/compose/docker-compose.example.yml --profile webhook up -d --build
+```
+
 For Docker deployments, prefer:
 
 ```bash
@@ -350,6 +381,7 @@ WATCHDOG_SERVICE_CHECK_MODE=command
 WATCHDOG_ONEBOT_CONNECTION_CHECK=none
 WATCHDOG_REQUIRE_ONEBOT_HTTP_API=true
 WATCHDOG_LOG_COMMAND='docker logs --since {minutes}m napcat'
+WATCHDOG_STATE_PATH=/data/state.json
 ```
 
 Mount the NapCat config/cache volume so `WATCHDOG_QR_GLOB` can find `qrcode.png`, or set

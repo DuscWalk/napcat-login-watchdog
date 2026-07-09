@@ -1,12 +1,36 @@
 services:
   napcat-login-watchdog:
-    image: python:3.11-slim
-    working_dir: /app
+    build:
+      context: ../..
+      dockerfile: deploy/compose/Dockerfile
     volumes:
-      - .:/app:ro
-      - ./data:/data
+      - ../../data:/data
+      # Mount your NapCat cache/config path when you want QR attachments.
+      # - /root/Napcat:/root/Napcat:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
     env_file:
-      - .env
-    command: sh -c "pip install -e . && napcat-login-watchdog run"
+      - ../../.env
+    environment:
+      WATCHDOG_STATE_PATH: /data/state.json
+    command: sh -c 'while true; do napcat-login-watchdog run; sleep "$${WATCHDOG_INTERVAL_SECONDS:-60}"; done'
+    restart: unless-stopped
 
+  napcat-login-watchdog-click:
+    build:
+      context: ../..
+      dockerfile: deploy/compose/Dockerfile
+    profiles:
+      - webhook
+    ports:
+      - "127.0.0.1:18081:18081"
+    volumes:
+      - ../../data:/data
+      # Mount your NapCat cache/config path when you want QR attachments.
+      # - /root/Napcat:/root/Napcat:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    env_file:
+      - ../../.env
+    environment:
+      WATCHDOG_STATE_PATH: /data/state.json
+    command: napcat-login-watchdog serve-click-webhook
+    restart: unless-stopped
