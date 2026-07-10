@@ -23,6 +23,7 @@ class WatchdogConfig:
     log_command: str = ""
     state_path: str = "/opt/napcat-login-watchdog/state.json"
     send_recovery: bool = True
+    offline_alert_repeat_seconds: int = 0
     qr_path: str = ""
     qr_glob: str = "/root/Napcat/**/cache/qrcode.png"
     qr_max_age_seconds: int = 120
@@ -102,6 +103,10 @@ def load_config(env: Mapping[str, str]) -> WatchdogConfig:
         log_command=env.get("WATCHDOG_LOG_COMMAND", ""),
         state_path=env.get("WATCHDOG_STATE_PATH", "/opt/napcat-login-watchdog/state.json"),
         send_recovery=bool_env(env.get("WATCHDOG_SEND_RECOVERY"), True),
+        offline_alert_repeat_seconds=int_env(
+            env.get("WATCHDOG_OFFLINE_ALERT_REPEAT_SECONDS"),
+            0,
+        ),
         qr_path=env.get("WATCHDOG_QR_PATH", ""),
         qr_glob=env.get("WATCHDOG_QR_GLOB", "/root/Napcat/**/cache/qrcode.png"),
         qr_max_age_seconds=int_env(env.get("WATCHDOG_QR_MAX_AGE_SECONDS"), 120),

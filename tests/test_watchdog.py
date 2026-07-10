@@ -42,6 +42,45 @@ def test_run_watchdog_sends_offline_email_once_and_records_state(tmp_path: Path)
     assert state["last_failure_reasons"]
 
 
+def test_run_watchdog_repeats_offline_email_after_cooldown(tmp_path: Path) -> None:
+    qr = tmp_path / "qrcode.png"
+    qr.write_bytes(b"fake-png")
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        '{"status":"unhealthy","last_alert_timestamp":100,"active_qr_token":"abc123"}',
+        encoding="utf-8",
+    )
+    sent = []
+    config = WatchdogConfig(
+        state_path=str(state_path),
+        qr_path=str(qr),
+        offline_alert_repeat_seconds=300,
+        smtp_user="sender@qq.com",
+        smtp_password="smtp-code",
+        alert_email_from="sender@qq.com",
+        alert_email_to=["admin@example.com"],
+    )
+    deps = WatchdogDependencies(
+        service_is_active=lambda service: service == "napcat.service",
+        tcp_connect=lambda host, port: False,
+        read_recent_logs=lambda cfg: "请扫描下面的二维码",
+        send_email=lambda cfg, message: sent.append(message),
+        read_replies=lambda cfg: [],
+        run_refresh_command=lambda cfg: 0,
+        now=lambda: 500.0,
+        token_factory=lambda: "unused",
+        sleep=lambda seconds: None,
+        log=lambda message: None,
+    )
+
+    report = run_watchdog(config, deps)
+
+    assert report.status == "unhealthy"
+    assert len(sent) == 1
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state["last_alert_timestamp"] == 500
+
+
 def test_run_watchdog_can_skip_service_and_onebot_socket_checks(tmp_path: Path) -> None:
     sent = []
     config = WatchdogConfig(

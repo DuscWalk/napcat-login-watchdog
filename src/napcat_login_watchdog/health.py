@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import urllib.error
 import urllib.request
@@ -22,11 +23,82 @@ MANUAL_LOGIN_LOG_MARKERS = (
     "sms-verify-login",
 )
 
+HEALTHY_LOG_MARKERS = (
+    "Bot ",
+    "[message.",
+)
+
+_JOURNAL_TS = re.compile(
+    r"^(?P<month>[A-Z][a-z]{2})\s+(?P<day>\d{1,2})\s+"
+    r"(?P<hour>\d{2}):(?P<minute>\d{2}):(?P<second>\d{2})"
+)
+_APP_TS = re.compile(
+    r"(?P<month>\d{2})-(?P<day>\d{2})\s+"
+    r"(?P<hour>\d{2}):(?P<minute>\d{2}):(?P<second>\d{2})"
+)
+_MONTH_INDEX = {
+    "Jan": 1,
+    "Feb": 2,
+    "Mar": 3,
+    "Apr": 4,
+    "May": 5,
+    "Jun": 6,
+    "Jul": 7,
+    "Aug": 8,
+    "Sep": 9,
+    "Oct": 10,
+    "Nov": 11,
+    "Dec": 12,
+}
+
 
 @dataclass(frozen=True, slots=True)
 class HealthReport:
     status: str
     reasons: list[str]
+
+
+def _line_position(line: str, fallback_index: int) -> tuple[int, int, int, int, int, int]:
+    journal = _JOURNAL_TS.search(line)
+    if journal is not None:
+        return (
+            _MONTH_INDEX.get(journal.group("month"), 0),
+            int(journal.group("day")),
+            int(journal.group("hour")),
+            int(journal.group("minute")),
+            int(journal.group("second")),
+            fallback_index,
+        )
+    app = _APP_TS.search(line)
+    if app is not None:
+        return (
+            int(app.group("month")),
+            int(app.group("day")),
+            int(app.group("hour")),
+            int(app.group("minute")),
+            int(app.group("second")),
+            fallback_index,
+        )
+    return (0, 0, 0, 0, 0, fallback_index)
+
+
+def _latest_marker_position(logs: str, markers: tuple[str, ...]) -> tuple[int, int, int, int, int, int] | None:
+    latest = None
+    for index, line in enumerate(logs.splitlines()):
+        if not any(marker in line for marker in markers):
+            continue
+        position = _line_position(line, index)
+        if latest is None or position > latest:
+            latest = position
+    return latest
+
+
+def log_markers_are_current(recent_logs: str, markers: tuple[str, ...]) -> bool:
+    latest_marker = _latest_marker_position(recent_logs, markers)
+    if latest_marker is None:
+        return False
+    latest_healthy = _latest_marker_position(recent_logs, HEALTHY_LOG_MARKERS)
+    return latest_healthy is None or latest_marker > latest_healthy
 
 
 def evaluate_health(
@@ -50,9 +122,9 @@ def evaluate_health(
         reasons.append("OneBot reverse WebSocket is not connected")
     if config.require_onebot_http_api and not onebot_http_api_healthy:
         reasons.append("OneBot HTTP API status check failed")
-    if any(marker in recent_logs for marker in OFFLINE_LOG_MARKERS):
+    if log_markers_are_current(recent_logs, OFFLINE_LOG_MARKERS):
         reasons.append("NapCat offline/login-expired marker found")
-    if any(marker in recent_logs for marker in MANUAL_LOGIN_LOG_MARKERS):
+    if log_markers_are_current(recent_logs, MANUAL_LOGIN_LOG_MARKERS):
         reasons.append("NapCat login requires QR/manual verification")
     return HealthReport(status="unhealthy" if reasons else "healthy", reasons=reasons)
 
@@ -62,10 +134,21 @@ def decide_status_email(
     report: HealthReport,
     *,
     send_recovery: bool,
+    now: int | float | None = None,
+    repeat_seconds: int = 0,
 ) -> str | None:
     previous_status = state.get("status")
     if report.status == "unhealthy" and previous_status != "unhealthy":
         return "offline"
+    if (
+        report.status == "unhealthy"
+        and previous_status == "unhealthy"
+        and repeat_seconds > 0
+        and now is not None
+    ):
+        last_alert = int(state.get("last_alert_timestamp") or 0)
+        if last_alert <= 0 or now - last_alert >= repeat_seconds:
+            return "offline"
     if report.status == "healthy" and previous_status == "unhealthy" and send_recovery:
         return "recovery"
     return None

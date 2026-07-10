@@ -17,4 +17,5 @@ def save_state(path: Path, state: Mapping[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(f"{path.suffix}.tmp")
     tmp.write_text(json.dumps(state, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+    tmp.chmod(0o600)
     tmp.replace(path)

@@ -21,6 +21,7 @@ def test_load_config_uses_safe_defaults_and_mail_fallbacks() -> None:
     assert config.alert_email_to == ["admin@example.com", "ops@example.com"]
     assert config.imap_user == "sender@qq.com"
     assert config.imap_password == "smtp-code"
+    assert config.offline_alert_repeat_seconds == 0
 
 
 def test_load_config_parses_onebot_http_and_click_settings() -> None:
@@ -57,6 +58,7 @@ def test_load_config_parses_portability_settings() -> None:
             "WATCHDOG_NAPCAT_CHECK_COMMAND": "docker inspect napcat",
             "WATCHDOG_ONEBOT_CONNECTION_CHECK": "none",
             "WATCHDOG_LOG_COMMAND": "docker logs --since {minutes}m napcat",
+            "WATCHDOG_OFFLINE_ALERT_REPEAT_SECONDS": "900",
             "SMTP_SSL": "false",
             "SMTP_STARTTLS": "true",
         }
@@ -67,5 +69,6 @@ def test_load_config_parses_portability_settings() -> None:
     assert config.napcat_check_command == "docker inspect napcat"
     assert config.onebot_connection_check == "none"
     assert config.log_command == "docker logs --since {minutes}m napcat"
+    assert config.offline_alert_repeat_seconds == 900
     assert config.smtp_ssl is False
     assert config.smtp_starttls is True

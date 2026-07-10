@@ -17,7 +17,8 @@ code out of logs.
 - Checks OneBot reverse WebSocket connection with `ss`.
 - Optionally calls NapCat OneBot HTTP API `get_login_info` and `get_status`.
 - Scans recent journal logs for explicit offline, login-expired, QR, or manual verification markers.
-- Sends an offline email only when state changes from healthy to unhealthy.
+- Sends an offline email when state changes from healthy to unhealthy, with optional repeat alerts
+  while the account stays unhealthy.
 - Sends an optional recovery email when state returns to healthy.
 - Attaches the newest fresh NapCat QR image when available.
 - Can refresh QR by authorized IMAP replies.
@@ -475,9 +476,16 @@ Set `WATCHDOG_QR_PATH` to the exact file or adjust `WATCHDOG_QR_GLOB`.
 
 ### You receive one alert but no repeated emails
 
-This is intentional. The watchdog sends offline email only when state changes from healthy to
-unhealthy. Use the reply or click refresh flow to request another QR while the account remains
-unhealthy.
+By default this is intentional: `WATCHDOG_OFFLINE_ALERT_REPEAT_SECONDS=0` means the watchdog sends
+offline email only when state changes from healthy to unhealthy. Set it to a positive cooldown, for
+example `1800`, to repeat offline alerts while the account remains unhealthy. You can still use the
+reply or click refresh flow to request another QR at any time.
+
+### Stale offline logs keep the state unhealthy
+
+The watchdog ignores offline, QR, and manual-login markers when a newer OneBot connection or message
+log appears in the same log window. If the state still stays unhealthy after a successful login,
+check the other failure reasons in the state file, especially OneBot HTTP API authentication.
 
 ## Security Notes
 

@@ -156,16 +156,23 @@ def run_watchdog(config: WatchdogConfig, deps: WatchdogDependencies) -> HealthRe
         recent_logs=deps.read_recent_logs(config),
     )
 
-    email_kind = decide_status_email(state, report, send_recovery=config.send_recovery)
+    now = int(deps.now())
+    email_kind = decide_status_email(
+        state,
+        report,
+        send_recovery=config.send_recovery,
+        now=now,
+        repeat_seconds=config.offline_alert_repeat_seconds,
+    )
     token = str(state.get("active_qr_token") or deps.token_factory())
     if email_kind == "offline" and config.click_public_base_url:
         token = deps.token_factory()
     if report.status == "unhealthy":
         state["active_qr_token"] = token
         if email_kind == "offline":
-            state["active_qr_token_timestamp"] = int(deps.now())
+            state["active_qr_token_timestamp"] = now
         else:
-            state.setdefault("active_qr_token_timestamp", int(deps.now()))
+            state.setdefault("active_qr_token_timestamp", now)
 
     if email_kind == "offline":
         qr_path = fresh_qr_after_optional_refresh(config, deps, force_refresh=False)
@@ -176,10 +183,10 @@ def run_watchdog(config: WatchdogConfig, deps: WatchdogDependencies) -> HealthRe
             body=offline_body(report, qr_path),
             qr_path=qr_path,
         ):
-            state["last_alert_timestamp"] = int(deps.now())
+            state["last_alert_timestamp"] = now
             if qr_path is not None:
                 state["last_qr_path"] = str(qr_path)
-                state["last_qr_timestamp"] = int(deps.now())
+                state["last_qr_timestamp"] = now
     elif email_kind == "recovery":
         if send_if_configured(
             config,
@@ -187,7 +194,7 @@ def run_watchdog(config: WatchdogConfig, deps: WatchdogDependencies) -> HealthRe
             subject="[napcat-watchdog] NapCat login recovered",
             body=recovery_body(),
         ):
-            state["last_recovery_timestamp"] = int(deps.now())
+            state["last_recovery_timestamp"] = now
 
     handled = [str(uid) for uid in state.get("handled_reply_uids", [])]
     if config.reply_enabled and imap_configured(config):
@@ -211,7 +218,7 @@ def run_watchdog(config: WatchdogConfig, deps: WatchdogDependencies) -> HealthRe
 
     state["status"] = report.status
     state["last_failure_reasons"] = report.reasons
-    state["last_checked_timestamp"] = int(deps.now())
+    state["last_checked_timestamp"] = now
     save_state(state_path, state)
     return report
 

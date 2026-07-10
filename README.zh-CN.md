@@ -13,7 +13,8 @@
 - 通过 `ss` 检查 OneBot 反向 WebSocket 是否连接。
 - 可选调用 NapCat OneBot HTTP API 的 `get_login_info` 和 `get_status`。
 - 扫描近期日志中的登录失效、二维码、人工验证等明确标记。
-- 只在 healthy/unhealthy 状态转换时发送离线或恢复邮件，避免刷屏。
+- 在 healthy 变为 unhealthy 时发送离线邮件，也可以配置持续 unhealthy 时按冷却重复提醒。
+- 在 unhealthy 恢复为 healthy 时发送可选恢复邮件。
 - 自动附带最新的 NapCat 登录二维码图片。
 - 支持管理员回复邮件触发刷新二维码。
 - 支持带 token 的点击链接触发刷新二维码。
@@ -462,7 +463,13 @@ find /root/Napcat /opt -name qrcode.png 2>/dev/null
 
 ### 只收到一次离线邮件
 
-这是预期行为。watchdog 只在状态从 healthy 变为 unhealthy 时发送离线邮件，避免刷屏。账号仍然 unhealthy 时，可以通过回复邮件或点击链接请求新二维码。
+默认这是预期行为：`WATCHDOG_OFFLINE_ALERT_REPEAT_SECONDS=0` 表示只在状态从 healthy 变为
+unhealthy 时发送离线邮件。把它设成正数冷却时间，比如 `1800`，就会在账号持续 unhealthy
+时重复提醒。账号仍然 unhealthy 时，也可以随时通过回复邮件或点击链接请求新二维码。
+
+### 过期掉线日志让状态一直 unhealthy
+
+如果同一个日志窗口内出现了更新的 OneBot 连接或消息日志，watchdog 会忽略更旧的掉线、二维码和人工验证标记。如果扫码成功后仍然 unhealthy，请优先看 state 文件里的其他失败原因，尤其是 OneBot HTTP API 鉴权。
 
 ## 安全注意事项
 
